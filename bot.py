@@ -12,7 +12,12 @@ TOKEN = os.getenv("TOKEN")
 GUILD_ID = None
 COOLDOWN_DAYS = 7
 
-DISCOUNTS = [
+COOLDOWN_FILE = "cooldowns.json"
+CODES_FILE = "codes.json"
+DISCOUNTS_FILE = "discounts.json"
+
+# Domyślne szanse (jak plik nie istnieje)
+DEFAULT_DISCOUNTS = [
     (5,  35),
     (10, 30),
     (15, 20),
@@ -20,9 +25,6 @@ DISCOUNTS = [
     (25, 4),
     (30, 1),
 ]
-
-COOLDOWN_FILE = "cooldowns.json"
-CODES_FILE = "codes.json"
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -37,6 +39,14 @@ def load_json(filename):
 def save_json(filename, data):
     with open(filename, "w") as f:
         json.dump(data, f, indent=2)
+
+def load_discounts():
+    data = load_json(DISCOUNTS_FILE)
+    if not data:
+        # Zapisujemy domyślne
+        save_json(DISCOUNTS_FILE, DEFAULT_DISCOUNTS)
+        return DEFAULT_DISCOUNTS
+    return data
 
 def can_use(user_id: int):
     data = load_json(COOLDOWN_FILE)
@@ -62,13 +72,14 @@ def set_cooldown(user_id: int):
     save_json(COOLDOWN_FILE, data)
 
 def losuj_znizke():
+    discounts = load_discounts()
     r = random.uniform(0, 100)
     cumulative = 0
-    for percent, chance in DISCOUNTS:
+    for percent, chance in discounts:
         cumulative += chance
         if r <= cumulative:
             return percent
-    return DISCOUNTS[-1][0]
+    return discounts[-1][0]
 
 def generuj_kod(znizka: int, user_id: int, username: str) -> str:
     losowa = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
@@ -189,10 +200,7 @@ async def sprawdzkod(interaction: discord.Interaction, kod: str):
         return
     
     info = codes[kod]
-    embed = discord.Embed(
-        title="✅ Kod prawidłowy",
-        color=discord.Color.green()
-    )
+    embed = discord.Embed(title="✅ Kod prawidłowy", color=discord.Color.green())
     embed.add_field(name="Zniżka", value=f"**{info['znizka']}%**", inline=True)
     embed.add_field(name="Wylosował", value=info['username'], inline=True)
     embed.add_field(name="Data", value=info['data'][:16].replace("T", " "), inline=False)
@@ -200,10 +208,54 @@ async def sprawdzkod(interaction: discord.Interaction, kod: str):
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @bot.tree.command(name="szanse", description="Pokaż aktualne szanse na zniżki")
-@app_commands.checks.has_permissions(administrator=True)
 async def szanse(interaction: discord.Interaction):
-    text = "\n".join([f"**{p}%** → `{c}%` szans" for p, c in DISCOUNTS])
+    discounts = load_discounts()
+    text = "\n".join([f"**{p}%** → `{c}%` szans" for p, c in discounts])
     embed = discord.Embed(title="Aktualne szanse dropu", description=text, color=discord.Color.blurple())
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="edytujszanse", description="Zmień szansę na konkretną zniżkę (tylko właściciel serwera)")
+@app_commands.describe(
+    procent="Procent zniżki (np. 15)",
+    szansa="Nowa szansa w % (np. 25)"
+)
+async def edytujszanse(interaction: discord.Interaction, procent: int, szansa: int):
+    # Tylko właściciel serwera
+    if interaction.user.id != interaction.guild.owner_id:
+        await interaction.response.send_message("❌ Tylko właściciel serwera może tego używać.", ephemeral=True)
+        return
+
+    if szansa < 0 or szansa > 100:
+        await interaction.response.send_message("Szansa musi być między 0 a 100.", ephemeral=True)
+        return
+
+    discounts = load_discounts()
+    
+    # Szukamy czy już jest taki procent
+    found = False
+    for i, (p, c) in enumerate(discounts):
+        if p == procent:
+            discounts[i] = (procent, szansa)
+            found = True
+            break
+    
+    if not found:
+        discounts.append((procent, szansa))
+        discounts.sort(key=lambda x: x[0])  # sortujemy po procencie
+
+    # Sprawdzamy sumę
+    total = sum(c for _, c in discounts)
+    if total != 100:
+        await interaction.response.send_message(
+            f"⚠️ Zapisano, ale suma szans wynosi teraz **{total}%** (powinno być 100%).",
+            ephemeral=True
+        )
+    else:
+        await interaction.response.send_message(
+            f"✅ Ustawiono **{procent}%** zniżki na **{szansa}%** szans.",
+            ephemeral=True
+        )
+
+    save_json(DISCOUNTS_FILE, discounts)
 
 bot.run(TOKEN)
