@@ -9,7 +9,7 @@ import string
 import secrets
 
 TOKEN = os.getenv("TOKEN")
-GUILD_ID = 1548643095770304643
+GUILD_ID = None
 COOLDOWN_DAYS = 7
 
 DISCOUNTS = [
