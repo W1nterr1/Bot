@@ -21,8 +21,8 @@ DISCOUNTS_FILE = "discounts.json"
 
 DEFAULT_DISCOUNTS = [
     (5, 20),   # -5 zł
-    (15, 10),   # -15 zł
-    (25, 2),   # -25 zł
+    (15, 7),   # -15 zł
+    (25, 1),   # -25 zł
 ]
 
 intents = discord.Intents.default()
