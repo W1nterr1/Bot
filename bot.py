@@ -19,9 +19,9 @@ CODES_FILE = "codes.json"
 DISCOUNTS_FILE = "discounts.json"
 
 DEFAULT_DISCOUNTS = [
-    (5, 15),
-    (15, 10),
-    (25, 3),
+    (5, 20),   # -5 zł
+    (15, 7),   # -15 zł
+    (25, 1),   # -25 zł
 ]
 
 intents = discord.Intents.default()
@@ -76,16 +76,15 @@ def set_cooldown(user_id: int):
 
 def losuj_znizke():
     discounts = load_discounts()
-    total = sum(chance for _, chance in discounts)
-    r = random.uniform(0, total)
-
+    r = random.uniform(0, 100)
     cumulative = 0
+
     for amount, chance in discounts:
         cumulative += chance
         if r <= cumulative:
             return amount
 
-    return discounts[-1][0]
+    return None
 
 
 def generuj_kod(znizka: int, user_id: int, username: str) -> str:
@@ -119,17 +118,11 @@ class ZnizkaView(discord.ui.View):
     @discord.ui.button(label="Użyj zniżki", style=discord.ButtonStyle.green, emoji="🎫")
     async def uzyj_znizki(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message(
-                "To nie Twoja zniżka!",
-                ephemeral=True
-            )
+            await interaction.response.send_message("To nie Twoja zniżka!", ephemeral=True)
             return
 
         if self.uzyto:
-            await interaction.response.send_message(
-                "Już użyłeś tej zniżki.",
-                ephemeral=True
-            )
+            await interaction.response.send_message("Już użyłeś tej zniżki.", ephemeral=True)
             return
 
         self.uzyto = True
@@ -146,14 +139,12 @@ class ZnizkaView(discord.ui.View):
                 color=discord.Color.green()
             )
             embed_dm.set_footer(text="Zachowaj ten kod – jest unikalny")
-
             await interaction.user.send(embed=embed_dm)
 
             await interaction.response.send_message(
                 f"✅ Kod został wysłany na Twoje DM!\nKod: `{kod}`",
                 ephemeral=True
             )
-
         except discord.Forbidden:
             await interaction.response.send_message(
                 f"⚠️ Nie mogę wysłać Ci DM.\nTwój kod: `{kod}`",
@@ -164,7 +155,6 @@ class ZnizkaView(discord.ui.View):
 @bot.event
 async def on_ready():
     print(f"Zalogowano jako {bot.user}")
-
     try:
         if GUILD_ID:
             synced = await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
@@ -172,7 +162,6 @@ async def on_ready():
             synced = await bot.tree.sync()
 
         print(f"Zsynchronizowano {len(synced)} komend")
-
     except Exception as e:
         print(f"Błąd sync: {e}")
 
@@ -195,6 +184,15 @@ async def znizka(interaction: discord.Interaction):
     znizka_kwota = losuj_znizke()
     set_cooldown(interaction.user.id)
 
+    if znizka_kwota is None:
+        embed = discord.Embed(
+            title="😔 Tym razem się nie udało",
+            description="Nie wylosowałeś żadnej zniżki. Spróbuj ponownie za tydzień!",
+            color=discord.Color.red()
+        )
+        await interaction.response.send_message(embed=embed)
+        return
+
     if znizka_kwota >= 25:
         color = discord.Color.gold()
         emoji = "🔥"
@@ -212,27 +210,19 @@ async def znizka(interaction: discord.Interaction):
     )
     embed.set_footer(text="Kliknij przycisk poniżej, żeby otrzymać kod na DM")
 
-    view = ZnizkaView(
-        znizka_kwota,
-        interaction.user.id,
-        str(interaction.user)
-    )
-
+    view = ZnizkaView(znizka_kwota, interaction.user.id, str(interaction.user))
     await interaction.response.send_message(embed=embed, view=view)
 
 
 @bot.tree.command(name="nadajznizke", description="Nadaj komuś zniżkę ręcznie (tylko admin)")
 @app_commands.describe(
     uzytkownik="Osoba, której nadajesz zniżkę",
-    procent="Kwota zniżki w zł (np. 15)"
+    procent="Kwota zniżki w zł"
 )
 @app_commands.checks.has_permissions(administrator=True)
 async def nadajznizke(interaction: discord.Interaction, uzytkownik: discord.Member, procent: int):
     if procent < 1 or procent > 100:
-        await interaction.response.send_message(
-            "Kwota musi być między 1 a 100 zł.",
-            ephemeral=True
-        )
+        await interaction.response.send_message("Kwota musi być między 1 a 100 zł.", ephemeral=True)
         return
 
     kod = generuj_kod(procent, uzytkownik.id, str(uzytkownik))
@@ -243,14 +233,12 @@ async def nadajznizke(interaction: discord.Interaction, uzytkownik: discord.Memb
             description=f"**Kod:** `{kod}`\n**Wartość:** **-{procent} zł**\nNadane przez administrację",
             color=discord.Color.green()
         )
-
         await uzytkownik.send(embed=embed_dm)
 
         await interaction.response.send_message(
-            f"✅ Nadano **-{procent} zł** zniżki użytkownikowi {uzytkownik.mention}\nKod: `{kod}`",
+            f"✅ Nadano **-{procent} zł** użytkownikowi {uzytkownik.mention}\nKod: `{kod}`",
             ephemeral=True
         )
-
     except discord.Forbidden:
         await interaction.response.send_message(
             f"⚠️ Nie mogę wysłać DM do {uzytkownik.mention}.\nKod: `{kod}`",
@@ -285,10 +273,7 @@ async def sprawdzkod(interaction: discord.Interaction, kod: str):
 
     info = codes[kod]
 
-    embed = discord.Embed(
-        title="✅ Kod prawidłowy",
-        color=discord.Color.green()
-    )
+    embed = discord.Embed(title="✅ Kod prawidłowy", color=discord.Color.green())
     embed.add_field(name="Zniżka", value=f"**-{info['znizka']} zł**", inline=True)
     embed.add_field(name="Wylosował", value=info["username"], inline=True)
     embed.add_field(name="Data", value=info["data"][:16].replace("T", " "), inline=False)
@@ -299,9 +284,7 @@ async def sprawdzkod(interaction: discord.Interaction, kod: str):
 @bot.tree.command(name="szanse", description="Pokaż aktualne szanse na zniżki")
 async def szanse(interaction: discord.Interaction):
     discounts = load_discounts()
-    text = "\n".join(
-        [f"**-{p} zł** → `{c}` szans" for p, c in discounts]
-    )
+    text = "\n".join([f"**-{p} zł** → `{c}%` szans" for p, c in discounts])
 
     embed = discord.Embed(
         title="Aktualne szanse dropu",
@@ -314,8 +297,8 @@ async def szanse(interaction: discord.Interaction):
 
 @bot.tree.command(name="edytujszanse", description="Zmień szansę na konkretną zniżkę (tylko właściciel serwera)")
 @app_commands.describe(
-    procent="Kwota zniżki w zł (np. 15)",
-    szansa="Nowa szansa (np. 25)"
+    procent="Kwota zniżki w zł",
+    szansa="Nowa szansa w %"
 )
 async def edytujszanse(interaction: discord.Interaction, procent: int, szansa: int):
     if interaction.user.id != interaction.guild.owner_id:
@@ -335,7 +318,6 @@ async def edytujszanse(interaction: discord.Interaction, procent: int, szansa: i
     discounts = load_discounts()
 
     found = False
-
     for i, (p, c) in enumerate(discounts):
         if p == procent:
             discounts[i] = (procent, szansa)
@@ -348,14 +330,14 @@ async def edytujszanse(interaction: discord.Interaction, procent: int, szansa: i
 
     total = sum(c for _, c in discounts)
 
-    if total != 28:
+    if total != 100:
         await interaction.response.send_message(
-            f"⚠️ Zapisano, ale suma szans wynosi teraz **{total}** (obecnie bazowo jest 28).",
+            f"⚠️ Zapisano, ale suma szans wynosi teraz **{total}%** (powinno być 100%).",
             ephemeral=True
         )
     else:
         await interaction.response.send_message(
-            f"✅ Ustawiono **-{procent} zł** na **{szansa}** szans.",
+            f"✅ Ustawiono **-{procent} zł** na **{szansa}%** szans.",
             ephemeral=True
         )
 
